@@ -1,0 +1,53 @@
+name: Deploy .NET App to Windows EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-deploy:
+    runs-on: windows-latest
+
+    steps:
+
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: '6.0.x'
+
+    - name: Build Application
+      run: dotnet build --configuration Release
+
+    - name: Publish Application
+      run: dotnet publish -c Release -o publish
+
+    - name: Copy Files to EC2
+      run: |
+        $password = ConvertTo-SecureString "${{ secrets.EC2_PASSWORD }}" -AsPlainText -Force
+        $cred = New-Object System.Management.Automation.PSCredential ("${{ secrets.EC2_USERNAME }}", $password)
+
+        $session = New-PSSession -ComputerName ${{ secrets.EC2_HOST }} -Credential $cred
+
+        Copy-Item -Path "publish\*" -Destination "C:\inetpub\wwwroot\myapp" -Recurse -ToSession $session -Force
+
+    - name: Restart IIS App Pool
+      run: |
+        $password = ConvertTo-SecureString "${{ secrets.EC2_PASSWORD }}" -AsPlainText -Force
+        $cred = New-Object System.Management.Automation.PSCredential ("${{ secrets.EC2_USERNAME }}", $password)
+
+        Invoke-Command -ComputerName ${{ secrets.EC2_HOST }} -Credential $cred -ScriptBlock {
+            Import-Module WebAdministration
+            Restart-WebAppPool -Name "DefaultAppPool"
+        }
+
+    - name: Health Check
+      run: |
+        Start-Sleep -Seconds 10
+        $response = Invoke-WebRequest -Uri "http://${{ secrets.EC2_HOST }}/health" -UseBasicParsing
+        if ($response.StatusCode -ne 200) {
+          throw "Health check failed"
+        }
