@@ -1,10 +1,11 @@
 var builder = WebApplication.CreateBuilder(args);
+
 var app = builder.Build();
 
-// Root endpoint
-app.MapGet("/", () => "Hello from IIS deployed app!");
+// Home endpoint
+app.MapGet("/", () => "🚀 Hello Sagar! IIS Deployment Successful");
 
-// Health check endpoint (VERY IMPORTANT)
+// Health endpoint (IMPORTANT for pipeline)
 app.MapGet("/health", () => Results.Ok("Healthy"));
 
 app.Run();
