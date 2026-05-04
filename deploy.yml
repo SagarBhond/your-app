@@ -1,0 +1,63 @@
+name: Windows IIS Deployment
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-deploy:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v3
+
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v3
+      with:
+        dotnet-version: '6.0.x'
+
+    - name: Restore
+      run: dotnet restore ./src/MyApp.csproj
+
+    - name: Build
+      run: dotnet build ./src/MyApp.csproj --configuration Release
+
+    - name: Publish
+      run: dotnet publish ./src/MyApp.csproj -c Release -o publish
+
+    - name: Deploy to EC2
+      run: |
+        $password = ConvertTo-SecureString "${{ secrets.EC2_PASSWORD }}" -AsPlainText -Force
+        $cred = New-Object System.Management.Automation.PSCredential ("${{ secrets.EC2_USERNAME }}", $password)
+
+        $session = New-PSSession -ComputerName ${{ secrets.EC2_HOST }} -Credential $cred
+
+        Invoke-Command -Session $session -ScriptBlock {
+            if (!(Test-Path "C:\inetpub\wwwroot\myapp")) {
+                New-Item -ItemType Directory -Path "C:\inetpub\wwwroot\myapp"
+            }
+
+            Remove-Item "C:\inetpub\wwwroot\myapp\*" -Recurse -Force -ErrorAction SilentlyContinue
+        }
+
+        Copy-Item -Path "publish\*" -Destination "C:\inetpub\wwwroot\myapp" -Recurse -ToSession $session -Force
+
+    - name: Restart IIS App Pool
+      run: |
+        $password = ConvertTo-SecureString "${{ secrets.EC2_PASSWORD }}" -AsPlainText -Force
+        $cred = New-Object System.Management.Automation.PSCredential ("${{ secrets.EC2_USERNAME }}", $password)
+
+        Invoke-Command -ComputerName ${{ secrets.EC2_HOST }} -Credential $cred -ScriptBlock {
+            Import-Module WebAdministration
+            Restart-WebAppPool -Name "DefaultAppPool"
+        }
+
+    - name: Health Check
+      run: |
+        Start-Sleep -Seconds 15
+        $response = Invoke-WebRequest -Uri "http://${{ secrets.EC2_HOST }}/health" -UseBasicParsing
+        if ($response.StatusCode -ne 200) {
+          throw "Health check failed"
+        }
